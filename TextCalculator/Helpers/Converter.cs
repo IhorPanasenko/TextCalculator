@@ -1,55 +1,68 @@
-﻿using System;
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
+using System.Globalization;
 
 namespace TextCalculator
 {
     public static class Converter
     {
+        // Matches: optional sign, digits (with optional .), underscore, base (2-16)
+        private static readonly Regex BaseNumberRegex = new(
+            @"(?<sign>[-+]?)((?<int>[0-9A-Fa-f]+)(\.(?<frac>[0-9A-Fa-f]+))?)_(?<base>[2-9]|1[0-6])\b",
+            RegexOptions.Compiled);
+
         public static string ConvertSpecialNotations(string expr)
         {
-            // BIN(1010) → 10
-            expr = Regex.Replace(expr, @"BIN\(([^)]+)\)", m =>
+            return BaseNumberRegex.Replace(expr, match =>
             {
-                var val = Convert.ToInt32(m.Groups[1].Value, 2);
-                return val.ToString();
-            }, RegexOptions.IgnoreCase);
+                string sign = match.Groups["sign"].Value;
+                string intPart = match.Groups["int"].Value;
+                string fracPart = match.Groups["frac"].Success ? match.Groups["frac"].Value : "";
+                int numBase = int.Parse(match.Groups["base"].Value, CultureInfo.InvariantCulture);
 
-            // OCT(17) → 15
-            expr = Regex.Replace(expr, @"OCT\(([^)]+)\)", m =>
-            {
-                var val = Convert.ToInt32(m.Groups[1].Value, 8);
-                return val.ToString();
-            }, RegexOptions.IgnoreCase);
-
-            // DEC(42) → 42 (просто видаляємо мітку)
-            expr = Regex.Replace(expr, @"DEC\(([^)]+)\)", m =>
-            {
-                return m.Groups[1].Value;
-            }, RegexOptions.IgnoreCase);
-
-            // HEX(1F) → 31
-            expr = Regex.Replace(expr, @"HEX\(([^)]+)\)", m =>
-            {
-                var val = Convert.ToInt32(m.Groups[1].Value, 16);
-                return val.ToString();
-            }, RegexOptions.IgnoreCase);
-
-            return expr;
+                double value = ConvertBaseNumber(intPart, fracPart, numBase);
+                if (sign == "-") value = -value;
+                // Use InvariantCulture to ensure dot as decimal separator
+                return value.ToString("G17", CultureInfo.InvariantCulture);
+            });
         }
 
-        // (опційно) Метод для перетворення числа назад у різні системи числення
-        public static string ToBase(double value, string format)
+        private static double ConvertBaseNumber(string intPart, string fracPart, int numBase)
         {
-            int intValue = (int)Math.Round(value);
-
-            return format.ToUpper() switch
+            // Integer part
+            double result = 0;
+            for (int i = 0; i < intPart.Length; i++)
             {
-                "BIN" => Convert.ToString(intValue, 2),
-                "OCT" => Convert.ToString(intValue, 8),
-                "DEC" => intValue.ToString(),
-                "HEX" => Convert.ToString(intValue, 16).ToUpper(),
-                _ => throw new ArgumentException("Невідома система числення")
-            };
+                int digit = ParseDigit(intPart[i]);
+                if (digit >= numBase)
+                    throw new Exception($"Digit '{intPart[i]}' is not valid for base {numBase}");
+                result = result * numBase + digit;
+            }
+
+            // Fractional part
+            if (!string.IsNullOrEmpty(fracPart))
+            {
+                double frac = 0;
+                double basePow = numBase;
+                for (int i = 0; i < fracPart.Length; i++)
+                {
+                    int digit = ParseDigit(fracPart[i]);
+                    if (digit >= numBase)
+                        throw new Exception($"Digit '{fracPart[i]}' is not valid for base {numBase}");
+                    frac += digit / basePow;
+                    basePow *= numBase;
+                }
+                result += frac;
+            }
+
+            return result;
+        }
+
+        private static int ParseDigit(char c)
+        {
+            if (c >= '0' && c <= '9') return c - '0';
+            if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+            if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+            throw new Exception($"Invalid digit '{c}' in base number");
         }
     }
 }
