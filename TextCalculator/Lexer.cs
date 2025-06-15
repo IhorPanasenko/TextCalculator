@@ -1,5 +1,4 @@
-﻿using System;
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 
 namespace TextCalculator
 {
@@ -9,13 +8,11 @@ namespace TextCalculator
         private static readonly Regex numberPattern = new(@"^(0|[1-9]\d*)(\.\d+)?$", RegexOptions.Compiled);
         private static readonly Regex assignmentPattern = new(@"^\s*([A-Za-z]\w*)\s*=\s*(.+?);?\s*$", RegexOptions.Compiled);
         private static readonly Regex queryPattern = new(@"^\?\s*([A-Za-z]\w*)\s*$", RegexOptions.Compiled);
-        private static readonly Regex formatQueryPattern = new(@"^\?\s*(BIN|OCT|DEC|HEX)\s+(.+)$", RegexOptions.Compiled);
-        private static readonly Regex formatPrefixPattern = new(@"^\?\s*(BIN|OCT|DEC|HEX)\b", RegexOptions.Compiled);
 
         public static void ValidateCharacters(string line)
         {
             if (!Regex.IsMatch(line, @"^[A-Za-z0-9\s\+\-\*/\(\)=\.\?]+$"))
-                throw new Exception("Недопустимі символи у введенні");
+                throw new Exception("You have entered the symbols that are not allowed");
         }
 
         public static bool IsAssignment(string line)
@@ -27,7 +24,7 @@ namespace TextCalculator
         {
             var match = assignmentPattern.Match(line);
             if (!match.Success)
-                throw new Exception("Неправильне присвоєння");
+                throw new Exception("Invalid assignment");
             return (match.Groups[1].Value, match.Groups[2].Value);
         }
 
@@ -36,24 +33,11 @@ namespace TextCalculator
             return line.TrimStart().StartsWith("?");
         }
 
-        public static bool IsFormatQuery(string line)
-        {
-            return formatPrefixPattern.IsMatch(line);
-        }
-
-        public static (string format, string expression) ParseFormatQuery(string line)
-        {
-            var match = formatQueryPattern.Match(line.Trim());
-            if (!match.Success)
-                throw new Exception("Неправильний формат запиту на конвертацію");
-            return (match.Groups[1].Value.ToUpper(), match.Groups[2].Value.Trim());
-        }
-
         public static string GetQueryVariable(string line)
         {
             var match = queryPattern.Match(line.Trim());
             if (!match.Success)
-                throw new Exception("Неправильний формат запиту");
+                throw new Exception("Request has invalid format");
             return match.Groups[1].Value;
         }
 

@@ -13,19 +13,19 @@ namespace TextCalculator
             {
                 string value = token.Value;
 
-                if (Regex.IsMatch(value, @"^\d+(\.\d+)?$")) // число
+                if (Regex.IsMatch(value, @"^\d+(\.\d+)?$"))
                     PrintColored(value, ConsoleColor.Green);
-                else if (Regex.IsMatch(value, @"^[A-Z]$")) // змінна
+                else if (Regex.IsMatch(value, @"^[A-Z]$"))
                     PrintColored(value, ConsoleColor.Cyan);
-                else if ("+-*/()".Contains(value)) // оператори
+                else if ("+-*/()".Contains(value))
                     PrintColored(value, ConsoleColor.Yellow);
-                else if ("=?;".Contains(value)) // спеціальні символи
+                else if ("=?;".Contains(value))
                     PrintColored(value, ConsoleColor.Red);
                 else
-                    PrintColored(value, ConsoleColor.Gray); // інше (наприклад пробіл)
+                    PrintColored(value, ConsoleColor.Gray);
             }
 
-            Console.WriteLine(); // новий рядок після підсвічування
+            Console.WriteLine();
         }
 
         private static void PrintColored(string text, ConsoleColor color)
