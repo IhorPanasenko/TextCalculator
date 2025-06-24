@@ -21,9 +21,12 @@ namespace TextCalculator
                 variables[varName] = result;
 
                 if (highlightOutput)
-                    AnsiConsole.MarkupLine($"[green]{varName} = {result.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)}[/]");
+                    AnsiConsole.MarkupLine($"[green]{varName} = {result.ToString("0.######", CultureInfo.InvariantCulture)}[/]");
                 else
-                    Console.WriteLine($"{varName} = {result.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)}");
+                    Console.WriteLine($"{varName} = {result.ToString("0.######", CultureInfo.InvariantCulture)}");
+
+
+                PrintBetterRepresentation(result, highlightOutput);
             }
             else if (Regex.IsMatch(line, @"^(.+?)=>\s*_([2-9]|1[0-6])\s*;?$"))
             {
@@ -31,15 +34,13 @@ namespace TextCalculator
                 string expr = match.Groups[1].Value.Trim();
                 int targetBase = int.Parse(match.Groups[2].Value);
 
-                // Підставляємо змінні та обчислюємо вираз
                 string normalized = NormalizeUnaryMinus(expr);
                 string withVars = ReplaceVariables(normalized);
                 string expanded = Converter.ConvertSpecialNotations(withVars);
                 Lexer.ValidateCharacters(expanded);
                 double result = Compute(expanded);
 
-                // Виводимо результат у потрібній системі числення
-                string converted = ConvertToBase(result, targetBase);
+                string converted = Converter.ConvertToBase(result, targetBase);
 
                 if (highlightOutput)
                     AnsiConsole.MarkupLine($"Result in base {targetBase}: [green]{converted}[/]");
@@ -53,10 +54,13 @@ namespace TextCalculator
                 string varName = Lexer.GetQueryVariable(line);
                 if (variables.ContainsKey(varName))
                 {
+                    double value = variables[varName];
                     if (highlightOutput)
-                        AnsiConsole.MarkupLine($"[green]{varName} = {variables[varName].ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)}[/]");
+                        AnsiConsole.MarkupLine($"[green]{varName} = {value.ToString("0.######", CultureInfo.InvariantCulture)}[/]");
                     else
-                        Console.WriteLine($"{varName} = {variables[varName].ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)}");
+                        Console.WriteLine($"{varName} = {value.ToString("0.######", CultureInfo.InvariantCulture)}");
+
+                    PrintBetterRepresentation(value, highlightOutput);
                 }
                 else
                 {
@@ -65,20 +69,6 @@ namespace TextCalculator
                     else
                         Console.WriteLine($"Variable '{varName}' is not defined");
                 }
-            }
-            else if (Regex.IsMatch(line, @"=>\s*_([2-9]|1[0-6])\s*$"))
-            {
-                var match = Regex.Match(line, @"^(.*)=>\s*_([2-9]|1[0-6])\s*$");
-                string expr = match.Groups[1].Value.Trim();
-                int targetBase = int.Parse(match.Groups[2].Value);
-
-                double result = EvaluateExpression(expr);
-                string converted = ConvertToBase(result, targetBase);
-
-                if (highlightOutput)
-                    AnsiConsole.MarkupLine($"Result in base {targetBase}: [green]{converted}[/]");
-                else
-                    Console.WriteLine($"Result in base {targetBase}: {converted}");
             }
             else if (line.Trim().EndsWith("="))
             {
@@ -89,10 +79,32 @@ namespace TextCalculator
                     AnsiConsole.MarkupLine($"Result: [green]{result.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)}[/]");
                 else
                     Console.WriteLine($"Result: {result.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)}");
+
+                PrintBetterRepresentation(result, highlightOutput);
             }
             else
             {
                 throw new Exception("Unknown instruction format");
+            }
+        }
+
+        private void PrintBetterRepresentation(double value, bool highlightOutput)
+        {
+            if (HasRepeatingDecimal(value))
+            {
+                int? betterBase = Converter.FindBestFiniteBase(value);
+                if (betterBase != null)
+                {
+                    string alt = Converter.ConvertToBase(value, betterBase.Value);
+                    if (highlightOutput)
+                    {
+                        AnsiConsole.MarkupLine($"[yellow]Note:[/] This is a repeating decimal in base 10. Better representation found in base {betterBase}: [green]{alt}_{betterBase}[/]");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Note: This is a repeating decimal in base 10. Better representation found in base {betterBase}: {alt}_{betterBase}");
+                    }
+                }
             }
         }
 
@@ -119,11 +131,9 @@ namespace TextCalculator
         {
             foreach (var kvp in variables.OrderByDescending(k => k.Key.Length))
             {
-                // Handle unary minus: -A → -1*A
                 expr = Regex.Replace(expr, $@"(?<=^|[^A-Za-z0-9_])-{Regex.Escape(kvp.Key)}\b",
                     match => $"-1*{kvp.Value.ToString(CultureInfo.InvariantCulture)}");
 
-                // Handle normal variable usage
                 expr = Regex.Replace(expr, $@"\b{Regex.Escape(kvp.Key)}\b",
                     kvp.Value.ToString(CultureInfo.InvariantCulture));
             }
@@ -183,7 +193,7 @@ namespace TextCalculator
                     if (!Match(')')) throw new Exception("Missing closing parenthesis");
                     return x;
                 }
-                if (Match('-')) // unary minus
+                if (Match('-'))
                     return -ParsePrimary();
                 return ParseNumber();
             }
@@ -228,41 +238,10 @@ namespace TextCalculator
 
             return ParseExpression();
         }
-
-        private static string ConvertToBase(double value, int numBase)
+        private bool HasRepeatingDecimal(double value)
         {
-            string digits = "0123456789ABCDEF";
-
-            bool isNegative = value < 0;
-            value = Math.Abs(value);
-
-            long intPart = (long)value;
-            double fracPart = value - intPart;
-
-            string intStr = "";
-            if (intPart == 0)
-                intStr = "0";
-            else
-            {
-                while (intPart > 0)
-                {
-                    intStr = digits[(int)(intPart % numBase)] + intStr;
-                    intPart /= numBase;
-                }
-            }
-
-            string fracStr = "";
-            int maxDigits = 10;
-            while (fracPart > 0 && fracStr.Length < maxDigits)
-            {
-                fracPart *= numBase;
-                int digit = (int)fracPart;
-                fracStr += digits[digit];
-                fracPart -= digit;
-            }
-
-            string result = fracStr.Length > 0 ? $"{intStr}.{fracStr}" : intStr;
-            return isNegative ? "-" + result : result;
+            string str = value.ToString("G17", CultureInfo.InvariantCulture);
+            return str.Contains("666") || str.Contains("333") || str.Contains("999");
         }
     }
 }

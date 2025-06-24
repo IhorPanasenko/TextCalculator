@@ -12,6 +12,41 @@ namespace TextCalculator
         private static readonly Regex RepeatingDecimalRegex = new(
             @"(?<int>\d*)\.(?<nonrep>\d*)\((?<rep>\d+)\)", RegexOptions.Compiled);
 
+        public static string ConvertToBase(double value, int numBase)
+        {
+            string digits = "0123456789ABCDEF";
+
+            bool isNegative = value < 0;
+            value = Math.Abs(value);
+
+            long intPart = (long)value;
+            double fracPart = value - intPart;
+
+            string intStr = "";
+            if (intPart == 0)
+                intStr = "0";
+            else
+            {
+                while (intPart > 0)
+                {
+                    intStr = digits[(int)(intPart % numBase)] + intStr;
+                    intPart /= numBase;
+                }
+            }
+
+            string fracStr = "";
+            int maxDigits = 10;
+            while (fracPart > 0 && fracStr.Length < maxDigits)
+            {
+                fracPart *= numBase;
+                int digit = (int)fracPart;
+                fracStr += digits[digit];
+                fracPart -= digit;
+            }
+
+            string result = fracStr.Length > 0 ? $"{intStr}.{fracStr}" : intStr;
+            return isNegative ? "-" + result : result;
+        }
 
         public static string ConvertSpecialNotations(string expr)
         {
@@ -94,6 +129,68 @@ namespace TextCalculator
             if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
             if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
             throw new Exception($"Invalid digit '{c}' in base number");
+        }
+
+        public static int? FindBestFiniteBase(double value)
+        {
+            if (value == Math.Floor(value)) return null;
+
+            var frac = AsRational(value);
+            int denom = frac.Item2;
+
+            for (int baseN = 2; baseN <= 16; baseN++)
+            {
+                var baseFactors = GetPrimeFactors(baseN).ToHashSet();
+                bool ok = true;
+                foreach (var d in GetPrimeFactors(denom))
+                {
+                    if (!baseFactors.Contains(d))
+                    {
+                        ok = false;
+                        break;
+                    }
+                }
+                if (ok)
+                    return baseN;
+            }
+            return null;
+        }
+
+        private static Tuple<int, int> AsRational(double value, int maxDenominator = 10000)
+        {
+            int sign = Math.Sign(value);
+            value = Math.Abs(value);
+            int bestDen = 1;
+            double bestError = double.MaxValue;
+            int bestNum = 0;
+
+            for (int d = 1; d <= maxDenominator; d++)
+            {
+                int n = (int)Math.Round(value * d);
+                double err = Math.Abs(value - (double)n / d);
+                if (err < bestError)
+                {
+                    bestError = err;
+                    bestDen = d;
+                    bestNum = n;
+                }
+            }
+
+            return Tuple.Create(sign * bestNum, bestDen);
+        }
+
+        private static IEnumerable<int> GetPrimeFactors(int number)
+        {
+            int n = number;
+            for (int i = 2; i <= n / i; i++)
+            {
+                while (n % i == 0)
+                {
+                    yield return i;
+                    n /= i;
+                }
+            }
+            if (n > 1) yield return n;
         }
     }
 }
