@@ -5,14 +5,27 @@ namespace TextCalculator
 {
     public static class Converter
     {
-        // Matches: optional sign, digits (with optional .), underscore, base (2-16)
         private static readonly Regex BaseNumberRegex = new(
             @"(?<sign>[-+]?)((?<int>[0-9A-Fa-f]+)(\.(?<frac>[0-9A-Fa-f]+))?)_(?<base>[2-9]|1[0-6])\b",
             RegexOptions.Compiled);
 
+        private static readonly Regex RepeatingDecimalRegex = new(
+            @"(?<int>\d*)\.(?<nonrep>\d*)\((?<rep>\d+)\)", RegexOptions.Compiled);
+
+
         public static string ConvertSpecialNotations(string expr)
         {
-            return BaseNumberRegex.Replace(expr, match =>
+            expr = RepeatingDecimalRegex.Replace(expr, match =>
+            {
+                string intPart = match.Groups["int"].Value;
+                string nonRepPart = match.Groups["nonrep"].Value;
+                string repPart = match.Groups["rep"].Value;
+
+                double result = ConvertRepeatingDecimal(intPart, nonRepPart, repPart);
+                return result.ToString("G17", CultureInfo.InvariantCulture);
+            });
+
+            expr = BaseNumberRegex.Replace(expr, match =>
             {
                 string sign = match.Groups["sign"].Value;
                 string intPart = match.Groups["int"].Value;
@@ -21,14 +34,33 @@ namespace TextCalculator
 
                 double value = ConvertBaseNumber(intPart, fracPart, numBase);
                 if (sign == "-") value = -value;
-                // Use InvariantCulture to ensure dot as decimal separator
+
                 return value.ToString("G17", CultureInfo.InvariantCulture);
             });
+
+            return expr;
         }
+
+        private static double ConvertRepeatingDecimal(string intPart, string nonRepPart, string repPart)
+        {
+            string fullNumber = $"{intPart}.{nonRepPart}{repPart}{repPart}{repPart}";
+            double approx = double.Parse(fullNumber, CultureInfo.InvariantCulture);
+
+            int d = repPart.Length;
+            int k = nonRepPart.Length;
+
+            double pow10_k = Math.Pow(10, k);
+            double pow10_d = Math.Pow(10, d);
+            double numerator = double.Parse($"{intPart}{nonRepPart}{repPart}", CultureInfo.InvariantCulture) -
+                               double.Parse($"{intPart}{nonRepPart}", CultureInfo.InvariantCulture);
+            double denominator = pow10_k * (pow10_d - 1);
+
+            return numerator / denominator + (string.IsNullOrEmpty(intPart) ? 0 : int.Parse(intPart));
+        }
+
 
         private static double ConvertBaseNumber(string intPart, string fracPart, int numBase)
         {
-            // Integer part
             double result = 0;
             for (int i = 0; i < intPart.Length; i++)
             {
@@ -38,7 +70,6 @@ namespace TextCalculator
                 result = result * numBase + digit;
             }
 
-            // Fractional part
             if (!string.IsNullOrEmpty(fracPart))
             {
                 double frac = 0;

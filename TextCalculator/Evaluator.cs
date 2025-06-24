@@ -1,5 +1,6 @@
 ﻿using Spectre.Console;
 using System.Data;
+using System.Globalization;
 using System.Text.RegularExpressions;
 
 namespace TextCalculator
@@ -19,9 +20,9 @@ namespace TextCalculator
                 variables[varName] = result;
 
                 if (highlightOutput)
-                    AnsiConsole.MarkupLine($"[green]{varName} = {result:0.######}[/]");
+                    AnsiConsole.MarkupLine($"[green]{varName} = {result.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)}[/]");
                 else
-                    Console.WriteLine($"{varName} = {result:0.######}");
+                    Console.WriteLine($"{varName} = {result.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)}");
             }
             else if (Lexer.IsQuery(line))
             {
@@ -29,9 +30,9 @@ namespace TextCalculator
                 if (variables.ContainsKey(varName))
                 {
                     if (highlightOutput)
-                        AnsiConsole.MarkupLine($"[green]{varName} = {variables[varName]:0.######}[/]");
+                        AnsiConsole.MarkupLine($"[green]{varName} = {variables[varName].ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)}[/]");
                     else
-                        Console.WriteLine($"{varName} = {variables[varName]:0.######}");
+                        Console.WriteLine($"{varName} = {variables[varName].ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)}");
                 }
                 else
                 {
@@ -41,15 +42,29 @@ namespace TextCalculator
                         Console.WriteLine($"Variable '{varName}' is not defined");
                 }
             }
+            else if (Regex.IsMatch(line, @"=>\s*_([2-9]|1[0-6])\s*$"))
+            {
+                var match = Regex.Match(line, @"^(.*)=>\s*_([2-9]|1[0-6])\s*$");
+                string expr = match.Groups[1].Value.Trim();
+                int targetBase = int.Parse(match.Groups[2].Value);
+
+                double result = EvaluateExpression(expr);
+                string converted = ConvertToBase(result, targetBase);
+
+                if (highlightOutput)
+                    AnsiConsole.MarkupLine($"Result in base {targetBase}: [green]{converted}[/]");
+                else
+                    Console.WriteLine($"Result in base {targetBase}: {converted}");
+            }
             else if (line.Trim().EndsWith("="))
             {
                 string expr = line.Trim().TrimEnd('=');
                 double result = EvaluateExpression(expr);
 
                 if (highlightOutput)
-                    AnsiConsole.MarkupLine($"Result: [green]{result:0.######}[/]");
+                    AnsiConsole.MarkupLine($"Result: [green]{result.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)}[/]");
                 else
-                    Console.WriteLine($"Result: {result:0.######}");
+                    Console.WriteLine($"Result: {result.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)}");
             }
             else
             {
@@ -57,13 +72,17 @@ namespace TextCalculator
             }
         }
 
-
         private double EvaluateExpression(string expression)
         {
-            string normalized = NormalizeUnaryMinus(expression);
-            string withVars = ReplaceVariables(normalized);
+            expression = expression.Trim();
+            if (expression.EndsWith(";"))
+                expression = expression.Substring(0, expression.Length - 1).Trim();
+
+
+            string withVars = ReplaceVariables(expression);
+            string normalized = NormalizeUnaryMinus(withVars);
             string expanded = Converter.ConvertSpecialNotations(withVars);
-            ValidateSyntax(expanded);
+            Lexer.ValidateCharacters(expanded);
             return Compute(expanded);
         }
 
@@ -74,17 +93,17 @@ namespace TextCalculator
 
         private string ReplaceVariables(string expr)
         {
-            foreach (var kvp in variables)
+            foreach (var kvp in variables.OrderByDescending(k => k.Key.Length))
             {
-                expr = Regex.Replace(expr, $@"\b{kvp.Key}\b", kvp.Value.ToString());
+                // Handle unary minus: -A → -1*A
+                expr = Regex.Replace(expr, $@"(?<=^|[^A-Za-z0-9_])-{Regex.Escape(kvp.Key)}\b",
+                    match => $"-1*{kvp.Value.ToString(CultureInfo.InvariantCulture)}");
+
+                // Handle normal variable usage
+                expr = Regex.Replace(expr, $@"\b{Regex.Escape(kvp.Key)}\b",
+                    kvp.Value.ToString(CultureInfo.InvariantCulture));
             }
             return expr;
-        }
-
-        private void ValidateSyntax(string expr)
-        {
-            if (!Regex.IsMatch(expr, @"^[\du\.\+\-\*/\(\)\s]+$"))
-                throw new Exception("Syntax error in the expression");
         }
 
         private double Compute(string expr)
@@ -149,12 +168,23 @@ namespace TextCalculator
             {
                 SkipWhitespace();
                 int start = pos;
-                while (pos < expr.Length && (char.IsDigit(expr[pos]) || expr[pos] == '.'))
+
+                while (pos < expr.Length &&
+                      (char.IsDigit(expr[pos]) || expr[pos] == '.' ||
+                       expr[pos] == 'e' || expr[pos] == 'E' ||
+                       (pos > start && (expr[pos] == '+' || expr[pos] == '-') &&
+                        (expr[pos - 1] == 'e' || expr[pos - 1] == 'E'))))
+                {
                     pos++;
+                }
+
                 if (start == pos)
                     throw new Exception("Expected number");
-                return double.Parse(expr.Substring(start, pos - start));
+
+                string numStr = expr.Substring(start, pos - start);
+                return double.Parse(numStr, System.Globalization.CultureInfo.InvariantCulture);
             }
+
 
             bool Match(char expected)
             {
@@ -174,5 +204,29 @@ namespace TextCalculator
 
             return ParseExpression();
         }
+
+        private static string ConvertToBase(double value, int numBase)
+        {
+            if (value % 1 != 0)
+                throw new Exception("Only integer values can be converted to other bases");
+
+            long intValue = (long)value;
+            if (intValue == 0) return "0";
+
+            string digits = "0123456789ABCDEF";
+            string result = "";
+
+            bool isNegative = intValue < 0;
+            intValue = Math.Abs(intValue);
+
+            while (intValue > 0)
+            {
+                result = digits[(int)(intValue % numBase)] + result;
+                intValue /= numBase;
+            }
+
+            return isNegative ? "-" + result : result;
+        }
+
     }
 }

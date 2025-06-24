@@ -102,12 +102,15 @@ namespace TextCalculator
             int bracketLevel = 0;
             var colorCycle = new[] { "red", "green", "blue", "magenta", "yellow" };
 
-            foreach (var token in Regex.Split(input, @"(\s+|\b)"))
+
+            foreach (var token in Regex.Split(input, @"(\s+|[+\-*/^=();]|\b)"))
             {
                 if (Regex.IsMatch(token, @"^[0-9]+(\.[0-9]+)?$"))
                     AnsiConsole.Markup($"[cyan]{token}[/]");
-                else if (Regex.IsMatch(token, @"^[A-Z]$"))
+                
+                else if (Regex.IsMatch(token, @"^[a-zA-Z][a-zA-Z0-9_]*$"))
                     AnsiConsole.Markup($"[green]{token}[/]");
+
                 else if (token == "(")
                 {
                     var color = colorCycle[bracketLevel % colorCycle.Length];
@@ -120,7 +123,7 @@ namespace TextCalculator
                     var color = colorCycle[bracketLevel % colorCycle.Length];
                     AnsiConsole.Markup($"[{color}]{token}[/]");
                 }
-                else if (Regex.IsMatch(token, @"[+\-*/=;]"))
+                else if (Regex.IsMatch(token, @"[+\-*/^=;]"))
                     AnsiConsole.Markup($"[yellow]{token}[/]");
                 else
                     AnsiConsole.Markup(token);
