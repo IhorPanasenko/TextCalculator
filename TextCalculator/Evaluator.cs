@@ -1,5 +1,4 @@
 ﻿using Spectre.Console;
-using System;
 using System.Data;
 using System.Globalization;
 using System.Text.RegularExpressions;
@@ -13,6 +12,7 @@ namespace TextCalculator
         public void Process(string line, bool highlightOutput = false)
         {
             Lexer.ValidateCharacters(line);
+            Lexer.DetectInvalidLeadingZerosGlobal(line);
 
             if (Lexer.IsAssignment(line))
             {

@@ -66,5 +66,28 @@ namespace TextCalculator
         {
             return numberPattern.IsMatch(input);
         }
+
+        public static void DetectInvalidLeadingZerosGlobal(string line)
+        {
+            var decimalMatches = Regex.Matches(line, @"(?<![_A-Za-z0-9])(?<full>\d+)(\.\d+)?(?![\w_])");
+            foreach (Match match in decimalMatches)
+            {
+                string full = match.Groups["full"].Value;
+
+                if (full.Length > 1 && full.StartsWith("0"))
+                {
+                    throw new Exception($"Invalid number '{match.Value}': leading zeros are not allowed in decimal numbers");
+                }
+            }
+
+            var baseMatches = Regex.Matches(line, @"(?<sign>[-+]?)(?<int>[0-9A-Fa-f]+)(\.(?<frac>[0-9A-Fa-f]+))?_(?<base>[2-9]|1[0-6])");
+            foreach (Match match in baseMatches)
+            {
+                string intPart = match.Groups["int"].Value;
+                string baseStr = match.Groups["base"].Value;
+                if (intPart.Length > 1 && intPart.StartsWith("0"))
+                    throw new Exception($"Invalid base-{baseStr} number '{match.Value}': leading zeros are not allowed in integer part");
+            }
+        }
     }
 }
