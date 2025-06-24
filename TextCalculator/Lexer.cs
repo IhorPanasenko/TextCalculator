@@ -17,6 +17,7 @@ namespace TextCalculator
 
         public static bool IsAssignment(string line)
         {
+            if (line.Contains("=>")) return false;
             var match = assignmentPattern.Match(line);
             if (!match.Success)
                 return false;

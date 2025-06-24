@@ -1,4 +1,5 @@
 ﻿using Spectre.Console;
+using System;
 using System.Data;
 using System.Globalization;
 using System.Text.RegularExpressions;
@@ -23,6 +24,29 @@ namespace TextCalculator
                     AnsiConsole.MarkupLine($"[green]{varName} = {result.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)}[/]");
                 else
                     Console.WriteLine($"{varName} = {result.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)}");
+            }
+            else if (Regex.IsMatch(line, @"^(.+?)=>\s*_([2-9]|1[0-6])\s*;?$"))
+            {
+                var match = Regex.Match(line, @"^(.+?)=>\s*_([2-9]|1[0-6])\s*;?$");
+                string expr = match.Groups[1].Value.Trim();
+                int targetBase = int.Parse(match.Groups[2].Value);
+
+                // Підставляємо змінні та обчислюємо вираз
+                string normalized = NormalizeUnaryMinus(expr);
+                string withVars = ReplaceVariables(normalized);
+                string expanded = Converter.ConvertSpecialNotations(withVars);
+                Lexer.ValidateCharacters(expanded);
+                double result = Compute(expanded);
+
+                // Виводимо результат у потрібній системі числення
+                string converted = ConvertToBase(result, targetBase);
+
+                if (highlightOutput)
+                    AnsiConsole.MarkupLine($"Result in base {targetBase}: [green]{converted}[/]");
+                else
+                    Console.WriteLine($"Result in base {targetBase}: {converted}");
+
+                return;
             }
             else if (Lexer.IsQuery(line))
             {
@@ -207,26 +231,38 @@ namespace TextCalculator
 
         private static string ConvertToBase(double value, int numBase)
         {
-            if (value % 1 != 0)
-                throw new Exception("Only integer values can be converted to other bases");
-
-            long intValue = (long)value;
-            if (intValue == 0) return "0";
-
             string digits = "0123456789ABCDEF";
-            string result = "";
 
-            bool isNegative = intValue < 0;
-            intValue = Math.Abs(intValue);
+            bool isNegative = value < 0;
+            value = Math.Abs(value);
 
-            while (intValue > 0)
+            long intPart = (long)value;
+            double fracPart = value - intPart;
+
+            string intStr = "";
+            if (intPart == 0)
+                intStr = "0";
+            else
             {
-                result = digits[(int)(intValue % numBase)] + result;
-                intValue /= numBase;
+                while (intPart > 0)
+                {
+                    intStr = digits[(int)(intPart % numBase)] + intStr;
+                    intPart /= numBase;
+                }
             }
 
+            string fracStr = "";
+            int maxDigits = 10;
+            while (fracPart > 0 && fracStr.Length < maxDigits)
+            {
+                fracPart *= numBase;
+                int digit = (int)fracPart;
+                fracStr += digits[digit];
+                fracPart -= digit;
+            }
+
+            string result = fracStr.Length > 0 ? $"{intStr}.{fracStr}" : intStr;
             return isNegative ? "-" + result : result;
         }
-
     }
 }
