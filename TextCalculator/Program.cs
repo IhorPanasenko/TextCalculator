@@ -45,10 +45,7 @@ namespace TextCalculator
 
                 try
                 {
-                    foreach (var instr in instructions)
-                    {
-                        evaluator.Process(instr, highlightOutput: true);
-                    }
+                    evaluator.ProcessBlock(instructions, highlightOutput: true);
                 }
                 catch (Exception ex)
                 {

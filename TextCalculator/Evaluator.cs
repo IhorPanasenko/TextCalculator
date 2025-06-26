@@ -9,6 +9,52 @@ namespace TextCalculator
     {
         private readonly Dictionary<string, double> variables = new();
 
+        public void ProcessBlock(IEnumerable<string> lines, bool highlightOutput = false)
+        {
+            var pending = new Queue<string>(lines.Where(l => !string.IsNullOrWhiteSpace(l)));
+            var processedLines = new HashSet<string>();
+            bool progressMade;
+
+            do
+            {
+                int initialCount = pending.Count;
+                var retryQueue = new Queue<string>();
+                progressMade = false;
+
+                while (pending.Count > 0)
+                {
+                    var line = pending.Dequeue();
+                    try
+                    {
+                        if (CanEvaluate(line))
+                        {
+                            Process(line, highlightOutput);
+                            processedLines.Add(line);
+                            progressMade = true;
+                        }
+                        else
+                        {
+                            retryQueue.Enqueue(line);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        // Re-throw unexpected errors
+                        throw new Exception($"Failed to process line: {line}\nReason: {ex.Message}", ex);
+                    }
+                }
+
+                pending = retryQueue;
+
+            } while (progressMade && pending.Count > 0);
+
+            if (pending.Count > 0)
+            {
+                var unresolved = string.Join("\n", pending.Select(l => $"[red]{l}[/]"));
+                throw new Exception("Unresolved instructions due to undefined variables:\n" + unresolved);
+            }
+        }
+
         public void Process(string line, bool highlightOutput = false)
         {
             Lexer.ValidateCharacters(line);
@@ -240,8 +286,51 @@ namespace TextCalculator
         }
         private bool HasRepeatingDecimal(double value)
         {
-            string str = value.ToString("G17", CultureInfo.InvariantCulture);
-            return str.Contains("666") || str.Contains("333") || str.Contains("999");
+            if (value == Math.Floor(value)) return false;
+
+            var frac = Converter.AsRational(value);
+            int denominator = frac.Item2;
+
+            foreach (var prime in Converter.GetPrimeFactors(denominator))
+            {
+                if (prime != 2 && prime != 5)
+                    return true;
+            }
+
+            return false;
         }
+
+        private bool CanEvaluate(string line)
+        {
+            // Queries are always safe if the variable exists
+            if (Lexer.IsQuery(line))
+                return variables.ContainsKey(Lexer.GetQueryVariable(line));
+
+            // Expressions with base conversion (e.g., A + B => _2)
+            var baseConvMatch = Regex.Match(line, @"^(.+?)=>\s*_([2-9]|1[0-6])\s*;?$");
+            string expr = baseConvMatch.Success ? baseConvMatch.Groups[1].Value.Trim() : line;
+
+            // If it's an assignment, extract only the right-hand expression
+            if (Lexer.IsAssignment(line))
+                expr = Lexer.ParseAssignment(line).expr;
+
+            // Replace known variables with 1, then check for any unknowns
+            string temp = expr;
+            foreach (var kvp in variables.OrderByDescending(k => k.Key.Length))
+            {
+                temp = Regex.Replace(temp, $@"(?<=^|[^A-Za-z0-9_]){Regex.Escape(kvp.Key)}\b", "1");
+            }
+
+            // Now check if there are any variable-like tokens left
+            var tokens = Regex.Matches(temp, @"\b[A-Za-z_][A-Za-z0-9_]*\b");
+            foreach (Match token in tokens)
+            {
+                if (!variables.ContainsKey(token.Value))
+                    return false;
+            }
+
+            return true;
+        }
+
     }
 }

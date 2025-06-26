@@ -76,23 +76,20 @@ namespace TextCalculator
             return expr;
         }
 
-        private static double ConvertRepeatingDecimal(string intPart, string nonRepPart, string repPart)
+        public static double ConvertRepeatingDecimal(string intPart, string nonRepPart, string repPart)
         {
-            string fullNumber = $"{intPart}.{nonRepPart}{repPart}{repPart}{repPart}";
-            double approx = double.Parse(fullNumber, CultureInfo.InvariantCulture);
+            int integer = string.IsNullOrEmpty(intPart) ? 0 : int.Parse(intPart);
+            double nonRepeating = string.IsNullOrEmpty(nonRepPart) ? 0.0 :
+                double.Parse("0." + nonRepPart, CultureInfo.InvariantCulture);
 
-            int d = repPart.Length;
-            int k = nonRepPart.Length;
+            double numerator = double.Parse(repPart, CultureInfo.InvariantCulture);
+            double denominator = Math.Pow(10, repPart.Length) - 1;
+            denominator *= Math.Pow(10, nonRepPart.Length);
 
-            double pow10_k = Math.Pow(10, k);
-            double pow10_d = Math.Pow(10, d);
-            double numerator = double.Parse($"{intPart}{nonRepPart}{repPart}", CultureInfo.InvariantCulture) -
-                               double.Parse($"{intPart}{nonRepPart}", CultureInfo.InvariantCulture);
-            double denominator = pow10_k * (pow10_d - 1);
+            double repeating = numerator / denominator;
 
-            return numerator / denominator + (string.IsNullOrEmpty(intPart) ? 0 : int.Parse(intPart));
+            return integer + nonRepeating + repeating;
         }
-
 
         private static double ConvertBaseNumber(string intPart, string fracPart, int numBase)
         {
@@ -156,7 +153,7 @@ namespace TextCalculator
             return null;
         }
 
-        private static Tuple<int, int> AsRational(double value, int maxDenominator = 10000)
+        public static Tuple<int, int> AsRational(double value, int maxDenominator = 10000)
         {
             int sign = Math.Sign(value);
             value = Math.Abs(value);
@@ -179,7 +176,7 @@ namespace TextCalculator
             return Tuple.Create(sign * bestNum, bestDen);
         }
 
-        private static IEnumerable<int> GetPrimeFactors(int number)
+        public static IEnumerable<int> GetPrimeFactors(int number)
         {
             int n = number;
             for (int i = 2; i <= n / i; i++)
