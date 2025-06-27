@@ -1,5 +1,4 @@
 ﻿using Spectre.Console;
-using System.Data;
 using System.Globalization;
 using System.Text.RegularExpressions;
 
@@ -7,53 +6,7 @@ namespace TextCalculator
 {
     public class Evaluator
     {
-        private readonly Dictionary<string, double> variables = new();
-
-        public void ProcessBlock(IEnumerable<string> lines, bool highlightOutput = false)
-        {
-            var pending = new Queue<string>(lines.Where(l => !string.IsNullOrWhiteSpace(l)));
-            var processedLines = new HashSet<string>();
-            bool progressMade;
-
-            do
-            {
-                int initialCount = pending.Count;
-                var retryQueue = new Queue<string>();
-                progressMade = false;
-
-                while (pending.Count > 0)
-                {
-                    var line = pending.Dequeue();
-                    try
-                    {
-                        if (CanEvaluate(line))
-                        {
-                            Process(line, highlightOutput);
-                            processedLines.Add(line);
-                            progressMade = true;
-                        }
-                        else
-                        {
-                            retryQueue.Enqueue(line);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        // Re-throw unexpected errors
-                        throw new Exception($"Failed to process line: {line}\nReason: {ex.Message}", ex);
-                    }
-                }
-
-                pending = retryQueue;
-
-            } while (progressMade && pending.Count > 0);
-
-            if (pending.Count > 0)
-            {
-                var unresolved = string.Join("\n", pending.Select(l => $"[red]{l}[/]"));
-                throw new Exception("Unresolved instructions due to undefined variables:\n" + unresolved);
-            }
-        }
+        private readonly Dictionary<string, ExpressionValue> variables = new();
 
         public void Process(string line, bool highlightOutput = false)
         {
@@ -63,16 +16,22 @@ namespace TextCalculator
             if (Lexer.IsAssignment(line))
             {
                 var (varName, expr) = Lexer.ParseAssignment(line);
-                double result = EvaluateExpression(expr);
-                variables[varName] = result;
+                try
+                {
+                    string withVars = ReplaceVariables(expr);
+                    string normalized = NormalizeUnaryMinus(withVars);
+                    string expanded = Converter.ConvertSpecialNotations(normalized);
+                    Lexer.ValidateCharacters(expanded);
+                    double result = Compute(expanded);
+                    variables[varName] = new ExpressionValue { Expression = expr, NumericValue = result };
 
-                if (highlightOutput)
-                    AnsiConsole.MarkupLine($"[green]{varName} = {result.ToString("0.######", CultureInfo.InvariantCulture)}[/]");
-                else
-                    Console.WriteLine($"{varName} = {result.ToString("0.######", CultureInfo.InvariantCulture)}");
-
-
-                PrintBetterRepresentation(result, highlightOutput);
+                    PrintAssignment(varName, result, highlightOutput);
+                }
+                catch
+                {
+                    // Save unresolved expression
+                    variables[varName] = new ExpressionValue { Expression = expr };
+                }
             }
             else if (Regex.IsMatch(line, @"^(.+?)=>\s*_([2-9]|1[0-6])\s*;?$"))
             {
@@ -92,21 +51,17 @@ namespace TextCalculator
                     AnsiConsole.MarkupLine($"Result in base {targetBase}: [green]{converted}[/]");
                 else
                     Console.WriteLine($"Result in base {targetBase}: {converted}");
-
-                return;
             }
             else if (Lexer.IsQuery(line))
             {
                 string varName = Lexer.GetQueryVariable(line);
-                if (variables.ContainsKey(varName))
+                if (variables.TryGetValue(varName, out var value))
                 {
-                    double value = variables[varName];
-                    if (highlightOutput)
-                        AnsiConsole.MarkupLine($"[green]{varName} = {value.ToString("0.######", CultureInfo.InvariantCulture)}[/]");
-                    else
-                        Console.WriteLine($"{varName} = {value.ToString("0.######", CultureInfo.InvariantCulture)}");
-
-                    PrintBetterRepresentation(value, highlightOutput);
+                    if (value.IsResolved)
+                    {
+                        PrintAssignment(varName, value.NumericValue!.Value, highlightOutput);
+                        PrintBetterRepresentation(value.NumericValue.Value, highlightOutput);
+                    }
                 }
                 else
                 {
@@ -120,11 +75,10 @@ namespace TextCalculator
             {
                 string expr = line.Trim().TrimEnd('=');
                 double result = EvaluateExpression(expr);
-
                 if (highlightOutput)
-                    AnsiConsole.MarkupLine($"Result: [green]{result.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)}[/]");
+                    AnsiConsole.MarkupLine($"Result: [green]{result.ToString("0.######", CultureInfo.InvariantCulture)}[/]");
                 else
-                    Console.WriteLine($"Result: {result.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture)}");
+                    Console.WriteLine($"Result: {result.ToString("0.######", CultureInfo.InvariantCulture)}");
 
                 PrintBetterRepresentation(result, highlightOutput);
             }
@@ -134,56 +88,98 @@ namespace TextCalculator
             }
         }
 
-        private void PrintBetterRepresentation(double value, bool highlightOutput)
+        public void ProcessBlock(IEnumerable<string> lines, bool highlightOutput = false)
         {
-            if (HasRepeatingDecimal(value))
+            foreach (var line in lines.Where(l => !string.IsNullOrWhiteSpace(l)))
             {
-                int? betterBase = Converter.FindBestFiniteBase(value);
-                if (betterBase != null)
+                try
                 {
-                    string alt = Converter.ConvertToBase(value, betterBase.Value);
-                    if (highlightOutput)
+                    Process(line, highlightOutput);
+                }
+                catch (Exception ex)
+                {
+                    throw new Exception($"Failed to process line: {line}\nReason: {ex.Message}", ex);
+                }
+            }
+
+            TryEvaluatePending(highlightOutput);
+
+            var unresolved = variables.Where(kvp => !kvp.Value.IsResolved);
+            if (unresolved.Any())
+            {
+                var list = string.Join("\n", unresolved.Select(kvp => $"[red]{kvp.Key} = {kvp.Value}[/]"));
+                throw new Exception("Unresolved instructions due to undefined variables:\n" + list);
+            }
+        }
+
+        public void TryEvaluatePending(bool highlightOutput = false)
+        {
+            bool changed;
+            do
+            {
+                changed = false;
+                foreach (var key in variables.Keys.ToList())
+                {
+                    var val = variables[key];
+                    if (val.IsResolved) continue;
+
+                    try
                     {
-                        AnsiConsole.MarkupLine($"[yellow]Note:[/] This is a repeating decimal in base 10. Better representation found in base {betterBase}: [green]{alt}_{betterBase}[/]");
+                        double result = EvaluateExpression(val.Expression);
+                        variables[key] = new ExpressionValue { Expression = val.Expression, NumericValue = result };
+                        PrintAssignment(key, result, highlightOutput);
+                        PrintBetterRepresentation(result, highlightOutput);
+                        changed = true;
                     }
-                    else
+                    catch
                     {
-                        Console.WriteLine($"Note: This is a repeating decimal in base 10. Better representation found in base {betterBase}: {alt}_{betterBase}");
+                        // still unresolved
                     }
                 }
             }
+            while (changed);
+        }
+
+        private void PrintAssignment(string name, double value, bool highlightOutput)
+        {
+            if (highlightOutput)
+                AnsiConsole.MarkupLine($"[green]{name} = {value.ToString("0.######", CultureInfo.InvariantCulture)}[/]");
+            else
+                Console.WriteLine($"{name} = {value.ToString("0.######", CultureInfo.InvariantCulture)}");
         }
 
         private double EvaluateExpression(string expression)
         {
             expression = expression.Trim();
             if (expression.EndsWith(";"))
-                expression = expression.Substring(0, expression.Length - 1).Trim();
-
+                expression = expression[..^1].Trim();
 
             string withVars = ReplaceVariables(expression);
             string normalized = NormalizeUnaryMinus(withVars);
-            string expanded = Converter.ConvertSpecialNotations(withVars);
+            string expanded = Converter.ConvertSpecialNotations(normalized);
             Lexer.ValidateCharacters(expanded);
             return Compute(expanded);
-        }
-
-        private string NormalizeUnaryMinus(string expr)
-        {
-            return Regex.Replace(expr, @"(?<=^|\(|\+|\-|\*|\/)\-", "u");
         }
 
         private string ReplaceVariables(string expr)
         {
             foreach (var kvp in variables.OrderByDescending(k => k.Key.Length))
             {
-                expr = Regex.Replace(expr, $@"(?<=^|[^A-Za-z0-9_])-{Regex.Escape(kvp.Key)}\b",
-                    match => $"-1*{kvp.Value.ToString(CultureInfo.InvariantCulture)}");
+                if (kvp.Value.IsResolved)
+                {
+                    expr = Regex.Replace(expr, $@"(?<=^|[^A-Za-z0-9_])-{Regex.Escape(kvp.Key)}\b",
+                        $"-1*{kvp.Value.NumericValue!.Value.ToString(CultureInfo.InvariantCulture)}");
 
-                expr = Regex.Replace(expr, $@"\b{Regex.Escape(kvp.Key)}\b",
-                    kvp.Value.ToString(CultureInfo.InvariantCulture));
+                    expr = Regex.Replace(expr, $@"\b{Regex.Escape(kvp.Key)}\b",
+                        kvp.Value.NumericValue!.Value.ToString(CultureInfo.InvariantCulture));
+                }
             }
             return expr;
+        }
+
+        private string NormalizeUnaryMinus(string expr)
+        {
+            return Regex.Replace(expr, "(?<=^|\\(|\\+|\\-|\\*|\\/)-", "u");
         }
 
         private double Compute(string expr)
@@ -215,8 +211,7 @@ namespace TextCalculator
 
             double ParseFactor()
             {
-                double x = ParsePower();
-                return x;
+                return ParsePower();
             }
 
             double ParsePower()
@@ -250,10 +245,10 @@ namespace TextCalculator
                 int start = pos;
 
                 while (pos < expr.Length &&
-                      (char.IsDigit(expr[pos]) || expr[pos] == '.' ||
-                       expr[pos] == 'e' || expr[pos] == 'E' ||
-                       (pos > start && (expr[pos] == '+' || expr[pos] == '-') &&
-                        (expr[pos - 1] == 'e' || expr[pos - 1] == 'E'))))
+                       (char.IsDigit(expr[pos]) || expr[pos] == '.' ||
+                        expr[pos] == 'e' || expr[pos] == 'E' ||
+                        (pos > start && (expr[pos] == '+' || expr[pos] == '-') &&
+                         (expr[pos - 1] == 'e' || expr[pos - 1] == 'E'))))
                 {
                     pos++;
                 }
@@ -261,10 +256,9 @@ namespace TextCalculator
                 if (start == pos)
                     throw new Exception("Expected number");
 
-                string numStr = expr.Substring(start, pos - start);
-                return double.Parse(numStr, System.Globalization.CultureInfo.InvariantCulture);
+                string numStr = expr[start..pos];
+                return double.Parse(numStr, CultureInfo.InvariantCulture);
             }
-
 
             bool Match(char expected)
             {
@@ -284,6 +278,27 @@ namespace TextCalculator
 
             return ParseExpression();
         }
+
+        private void PrintBetterRepresentation(double value, bool highlightOutput)
+        {
+            if (HasRepeatingDecimal(value))
+            {
+                int? betterBase = Converter.FindBestFiniteBase(value);
+                if (betterBase != null)
+                {
+                    string alt = Converter.ConvertToBase(value, betterBase.Value);
+                    if (highlightOutput)
+                    {
+                        AnsiConsole.MarkupLine($"[yellow]Note:[/] Better representation in base {betterBase}: [green]{alt}_{betterBase}[/]");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"Note: Better representation in base {betterBase}: {alt}_{betterBase}");
+                    }
+                }
+            }
+        }
+
         private bool HasRepeatingDecimal(double value)
         {
             if (value == Math.Floor(value)) return false;
@@ -299,38 +314,16 @@ namespace TextCalculator
 
             return false;
         }
+    }
 
-        private bool CanEvaluate(string line)
-        {
-            // Queries are always safe if the variable exists
-            if (Lexer.IsQuery(line))
-                return variables.ContainsKey(Lexer.GetQueryVariable(line));
+    public class ExpressionValue
+    {
+        public string Expression { get; set; } = "";
+        public double? NumericValue { get; set; }
+        public bool IsResolved => NumericValue.HasValue;
 
-            // Expressions with base conversion (e.g., A + B => _2)
-            var baseConvMatch = Regex.Match(line, @"^(.+?)=>\s*_([2-9]|1[0-6])\s*;?$");
-            string expr = baseConvMatch.Success ? baseConvMatch.Groups[1].Value.Trim() : line;
-
-            // If it's an assignment, extract only the right-hand expression
-            if (Lexer.IsAssignment(line))
-                expr = Lexer.ParseAssignment(line).expr;
-
-            // Replace known variables with 1, then check for any unknowns
-            string temp = expr;
-            foreach (var kvp in variables.OrderByDescending(k => k.Key.Length))
-            {
-                temp = Regex.Replace(temp, $@"(?<=^|[^A-Za-z0-9_]){Regex.Escape(kvp.Key)}\b", "1");
-            }
-
-            // Now check if there are any variable-like tokens left
-            var tokens = Regex.Matches(temp, @"\b[A-Za-z_][A-Za-z0-9_]*\b");
-            foreach (Match token in tokens)
-            {
-                if (!variables.ContainsKey(token.Value))
-                    return false;
-            }
-
-            return true;
-        }
-
+        public override string ToString() => IsResolved
+            ? NumericValue.Value.ToString("G17", CultureInfo.InvariantCulture)
+            : Expression;
     }
 }

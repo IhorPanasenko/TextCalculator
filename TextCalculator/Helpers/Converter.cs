@@ -12,40 +12,57 @@ namespace TextCalculator
         private static readonly Regex RepeatingDecimalRegex = new(
             @"(?<int>\d*)\.(?<nonrep>\d*)\((?<rep>\d+)\)", RegexOptions.Compiled);
 
-        public static string ConvertToBase(double value, int numBase)
+        public static string ConvertToBase(double number, int baseN, int maxFractionDigits = 12)
         {
+            if (baseN < 2 || baseN > 16)
+                throw new ArgumentException("Base must be between 2 and 16");
+
             string digits = "0123456789ABCDEF";
 
-            bool isNegative = value < 0;
-            value = Math.Abs(value);
+            bool isNegative = number < 0;
+            number = Math.Abs(number);
 
-            long intPart = (long)value;
-            double fracPart = value - intPart;
+            long integerPart = (long)Math.Floor(number);
+            double fractionPart = number - integerPart;
 
+            // Convert integer part
             string intStr = "";
-            if (intPart == 0)
+            if (integerPart == 0)
                 intStr = "0";
             else
             {
-                while (intPart > 0)
+                while (integerPart > 0)
                 {
-                    intStr = digits[(int)(intPart % numBase)] + intStr;
-                    intPart /= numBase;
+                    int digit = (int)(integerPart % baseN);
+                    intStr = digits[digit] + intStr;
+                    integerPart /= baseN;
                 }
             }
 
+            // Convert fractional part
             string fracStr = "";
-            int maxDigits = 10;
-            while (fracPart > 0 && fracStr.Length < maxDigits)
+            int count = 0;
+            HashSet<double> seen = new();
+            while (fractionPart > 0 && count < maxFractionDigits)
             {
-                fracPart *= numBase;
-                int digit = (int)fracPart;
+                fractionPart *= baseN;
+                int digit = (int)Math.Floor(fractionPart);
                 fracStr += digits[digit];
-                fracPart -= digit;
+                fractionPart -= digit;
+
+                // Optional: break repeating cycle
+                if (!seen.Add(fractionPart))
+                    break;
+
+                count++;
             }
 
-            string result = fracStr.Length > 0 ? $"{intStr}.{fracStr}" : intStr;
-            return isNegative ? "-" + result : result;
+            string result = isNegative ? "-" : "";
+            result += intStr;
+            if (fracStr.Length > 0)
+                result += "." + fracStr;
+
+            return result;
         }
 
         public static string ConvertSpecialNotations(string expr)
@@ -62,7 +79,7 @@ namespace TextCalculator
 
             expr = BaseNumberRegex.Replace(expr, match =>
             {
-                string sign = match.Groups["sign"].Value;
+                string sign = match.Groups["sign"].Value; // може бути "-" або "" (порожнє)
                 string intPart = match.Groups["int"].Value;
                 string fracPart = match.Groups["frac"].Success ? match.Groups["frac"].Value : "";
                 int numBase = int.Parse(match.Groups["base"].Value, CultureInfo.InvariantCulture);

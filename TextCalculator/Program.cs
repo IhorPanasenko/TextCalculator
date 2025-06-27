@@ -7,12 +7,12 @@ namespace TextCalculator
     {
         static void Main()
         {
+            var evaluator = new Evaluator();
             AnsiConsole.MarkupLine("[bold yellow]Text calculator with highlighting[/]");
             AnsiConsole.MarkupLine("[dim]Enter the instructions. The empty line = execute. 'close' = end program exceution.[/]\n");
 
             while (true)
             {
-                var evaluator = new Evaluator();
                 var instructions = new List<string>();
                 bool shouldExit = false;
 
@@ -52,7 +52,6 @@ namespace TextCalculator
                     AnsiConsole.MarkupLine($"[bold red]Eror:[/] {ex.Message}");
                 }
 
-                AnsiConsole.MarkupLine("[grey]Variables are resetted.[/]\n");
 
                 if (shouldExit)
                     break;
@@ -102,9 +101,9 @@ namespace TextCalculator
 
             foreach (var token in Regex.Split(input, @"(\s+|[+\-*/^=();]|\b)"))
             {
-                if (Regex.IsMatch(token, @"^[0-9]+(\.[0-9]+)?$"))
+                if (Regex.IsMatch(token, @"^-?[0-9A-Fa-f]+(\.[0-9A-Fa-f]+)?(_[2-9]|_1[0-6])?$"))
                     AnsiConsole.Markup($"[cyan]{token}[/]");
-                
+
                 else if (Regex.IsMatch(token, @"^[a-zA-Z][a-zA-Z0-9_]*$"))
                     AnsiConsole.Markup($"[green]{token}[/]");
 
